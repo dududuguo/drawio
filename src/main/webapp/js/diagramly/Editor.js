@@ -3863,6 +3863,94 @@
 	};
 	
 	/**
+	 * Merges adjacent span elements with compatible styles within
+	 * foreignObject containers to prevent MathJax delimiter splitting.
+	 * This fixes a bug where the rich text editor splits $$...$$ LaTeX
+	 * delimiters across multiple <span> elements, which prevents
+	 * MathJax from matching and rendering the formula.
+	 */
+	Editor.normalizeTextForMath = function(container)
+	{
+		var fos = container.getElementsByTagName('foreignObject');
+
+		for (var i = 0; i < fos.length; i++)
+		{
+			Editor.mergeAdjacentSpans(fos[i]);
+		}
+	};
+
+	/**
+	 * Recursively merges adjacent span elements with compatible styles.
+	 */
+	Editor.mergeAdjacentSpans = function(element)
+	{
+		// First recurse into child elements
+		for (var i = 0; i < element.childNodes.length; i++)
+		{
+			var child = element.childNodes[i];
+
+			if (child.nodeType === 1)
+			{
+				Editor.mergeAdjacentSpans(child);
+			}
+		}
+
+		// Then merge adjacent spans at this level
+		var node = element.firstChild;
+
+		while (node != null)
+		{
+			var next = node.nextSibling;
+
+			if (node.nodeType === 1 && node.nodeName === 'SPAN' &&
+				next != null && next.nodeType === 1 && next.nodeName === 'SPAN' &&
+				Editor.areSpanStylesCompatible(node, next))
+			{
+				while (next.firstChild)
+				{
+					node.appendChild(next.firstChild);
+				}
+
+				next.parentNode.removeChild(next);
+				// Don't advance - check for more adjacent spans to merge
+			}
+			else
+			{
+				node = next;
+			}
+		}
+	};
+
+	/**
+	 * Returns true if two span elements have compatible styles that
+	 * allow them to be merged without visual changes.
+	 */
+	Editor.areSpanStylesCompatible = function(span1, span2)
+	{
+		// Check class attributes
+		var class1 = span1.getAttribute('class') || '';
+		var class2 = span2.getAttribute('class') || '';
+
+		if (class1 !== class2)
+		{
+			return false;
+		}
+
+		var style1 = span1.getAttribute('style') || '';
+		var style2 = span2.getAttribute('style') || '';
+
+		// Normalize by removing properties with initial/inherit/unset values
+		// (these are no-ops that the browser's contenteditable may add)
+		var normalize = function(s)
+		{
+			return s.replace(/[a-z-]+:\s*(initial|inherit|unset);?\s*/gi, '')
+				.replace(/;\s*$/, '').trim();
+		};
+
+		return normalize(style1) === normalize(style2);
+	};
+
+	/**
 	 * Initializes math typesetting and loads respective code.
 	 */
 	Editor.initMath = function(src, config)
@@ -3896,6 +3984,9 @@
 				{
 					if (rendering == null)
 					{
+						// Merges adjacent spans with compatible styles to fix
+						// split $$...$$ delimiters from the rich text editor
+						Editor.normalizeTextForMath(container);
 						MathJax.typesetClear([container]);
 						MathJax.typeset([container]);
 						mathJaxDone();
